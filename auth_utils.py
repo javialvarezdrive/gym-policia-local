@@ -1,75 +1,92 @@
 import streamlit as st
+import jwt
+from datetime import datetime, timedelta
 from db_utils import get_supabase_client
 
-def login(email, password):
-    """
-    Intenta iniciar sesión con las credenciales proporcionadas.
-    
-    Args:
-        email: Email del usuario
-        password: Contraseña del usuario
-        
-    Returns:
-        Tupla (éxito, datos del usuario o mensaje de error)
-    """
-    supabase = get_supabase_client()
-    
-    try:
-        # Intentar iniciar sesión
-        response = supabase.auth.sign_in_with_password({"email": email, "password": password})
-        user = response.user
-        
-        if user:
-            # Verificar si el usuario es un monitor
-            monitor_data = supabase.table('agentes').select('*').eq('email', email).eq('es_monitor', True).execute()
-            
-            if monitor_data.data and len(monitor_data.data) > 0:
-                return True, {
-                    "id": user.id, 
-                    "email": user.email,
-                    "monitor_data": monitor_data.data[0]
-                }
-            else:
-                return False, {"error": "El usuario no tiene permisos de monitor"}
-        else:
-            return False, {"error": "Error de autenticación"}
-    except Exception as e:
-        return False, {"error": str(e)}
+# Clave secreta para firmar el token JWT
+SECRET_KEY = "tu_clave_secreta_aqui_cambiala_en_produccion"
+TOKEN_EXPIRY_DAYS = 7  # El token durará 7 días
 
-def reset_password(email):
-    """
-    Envía un correo para restablecer la contraseña.
-    
-    Args:
-        email: Email del usuario
-        
-    Returns:
-        Tupla (éxito, mensaje)
-    """
+def login(username, password):
+    """Maneja el proceso de login y configura la sesión"""
     supabase = get_supabase_client()
     
-    try:
-        supabase.auth.reset_password_email(email)
-        return True, "Se ha enviado un correo para restablecer la contraseña"
-    except Exception as e:
-        return False, f"Error al enviar el correo: {str(e)}"
+    # Buscar el usuario en la base de datos
+    response = supabase.table('usuarios').select('*').eq('username', username).execute()
+    
+    if response.data and len(response.data) > 0:
+        user = response.data[0]
+        
+        # Verificar contraseña (en una aplicación real deberías usar hash)
+        if user['password'] == password:
+            # Crear token JWT
+            expiry = datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)
+            token = jwt.encode({
+                'user_id': user['id'],
+                'username': user['username'],
+                'role': user['role'],
+                'exp': expiry
+            }, SECRET_KEY, algorithm="HS256")
+            
+            # Guardar token en cookie y en session_state
+            st.session_state.user = {
+                'id': user['id'],
+                'username': user['username'],
+                'role': user['role']
+            }
+            
+            # Establecer cookie con el token
+            st.experimental_set_query_params(token=token)
+            
+            return True
+    
+    return False
 
 def logout():
-    """Cierra la sesión del usuario actual"""
-    supabase = get_supabase_client()
-    supabase.auth.sign_out()
+    """Maneja el proceso de logout"""
+    if 'user' in st.session_state:
+        del st.session_state.user
     
-    # Limpiar el estado de sesión en Streamlit
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-
-def is_authenticated():
-    """Verifica si el usuario está autenticado"""
-    return 'user' in st.session_state and st.session_state.user is not None
+    # Limpiar parámetros de consulta para eliminar el token
+    st.experimental_set_query_params()
+    st.rerun()
 
 def get_current_user():
-    """Obtiene los datos del usuario actual"""
-    if is_authenticated():
+    """Obtiene el usuario actual desde la sesión o token"""
+    # Primero intentar desde session_state
+    if 'user' in st.session_state:
         return st.session_state.user
+    
+    # Si no está en session_state, intentar desde los query params
+    query_params = st.experimental_get_query_params()
+    if 'token' in query_params:
+        token = query_params['token'][0]
+        try:
+            # Verificar y decodificar el token
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            
+            # Si el token es válido, restaurar la sesión
+            st.session_state.user = {
+                'id': payload['user_id'],
+                'username': payload['username'],
+                'role': payload['role']
+            }
+            return st.session_state.user
+        except jwt.ExpiredSignatureError:
+            # Token expirado
+            st.warning("Tu sesión ha expirado. Por favor inicia sesión nuevamente.")
+            st.experimental_set_query_params()
+        except jwt.InvalidTokenError:
+            # Token inválido
+            st.experimental_set_query_params()
+    
     return None
 
+def is_logged_in():
+    """Verifica si el usuario ha iniciado sesión"""
+    return get_current_user() is not None
+
+def show_login_required():
+    """Muestra un mensaje de inicio de sesión requerido"""
+    st.error("Debes iniciar sesión para acceder a esta sección")
+    st.stop()

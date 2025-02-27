@@ -1,12 +1,5 @@
 import streamlit as st
 from auth_utils import login, logout, reset_password, is_authenticated, get_current_user, is_admin
-from agent_management import show_agent_management
-from reservation_management import show_reservation_management
-from activity_management import show_activity_management
-from user_management import show_user_management
-from dashboard import show_dashboard
-from analytics import show_analytics
-from settings import show_settings
 
 # Configuración inicial de la aplicación
 st.set_page_config(
@@ -15,6 +8,49 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Funciones para mostrar diferentes secciones de la aplicación
+def show_dashboard():
+    st.title("Dashboard")
+    st.write("Bienvenido al panel de control del sistema de gestión del gimnasio.")
+    # Aquí puedes añadir estadísticas, gráficos, etc.
+    st.info("Esta sección mostrará información general y estadísticas del gimnasio.")
+
+def show_agent_management():
+    st.title("Gestión de Agentes")
+    st.write("En esta sección puedes gestionar los agentes de policía registrados.")
+    # Implementación básica
+    st.info("Aquí podrás añadir, editar o eliminar agentes.")
+
+def show_reservation_management():
+    st.title("Gestión de Reservas")
+    st.write("Administra las reservas del gimnasio.")
+    # Implementación básica
+    st.info("Aquí podrás ver, crear y gestionar reservas para diferentes actividades.")
+
+def show_activity_management():
+    st.title("Gestión de Actividades")
+    st.write("Configura las actividades disponibles en el gimnasio.")
+    # Implementación básica
+    st.info("Aquí podrás crear y gestionar las diferentes actividades disponibles.")
+
+def show_user_management():
+    st.title("Gestión de Usuarios")
+    st.write("Administra los usuarios del sistema.")
+    # Implementación básica - solo para administradores
+    st.info("Aquí podrás añadir, editar o eliminar usuarios del sistema.")
+
+def show_analytics():
+    st.title("Análisis de Datos")
+    st.write("Visualiza estadísticas y análisis del uso del gimnasio.")
+    # Implementación básica
+    st.info("Aquí se mostrarán gráficos y estadísticas sobre el uso del gimnasio.")
+
+def show_settings():
+    st.title("Configuración")
+    st.write("Configura los ajustes del sistema.")
+    # Implementación básica
+    st.info("Aquí podrás ajustar la configuración general del sistema.")
 
 # Función para mostrar la página de login
 def show_login_page():

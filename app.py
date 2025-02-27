@@ -1,5 +1,9 @@
 import streamlit as st
 from auth_utils import login, logout, reset_password, is_authenticated, get_current_user
+import agent_management
+import activity_management
+import reservation_management
+import dashboard
 
 # Configurar la página
 st.set_page_config(
@@ -29,7 +33,7 @@ def show_login_page():
                 
                 if success:
                     st.session_state.user = user_data
-                    st.rerun()  # Cambiado de experimental_rerun a rerun
+                    st.rerun()
                 else:
                     st.error(user_data.get("error", "Error de autenticación"))
     
@@ -56,23 +60,48 @@ def show_main_page():
         
         st.divider()
         
+        # Menú de navegación
+        selected_page = st.radio(
+            "Navegación",
+            options=["Inicio", "Gestión de Agentes", "Gestión de Actividades", 
+                    "Reservas del Gimnasio", "Dashboard"],
+            index=0
+        )
+        
+        st.divider()
+        
         # Botón de logout
         if st.button("Cerrar Sesión"):
             logout()
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
     
-    # Contenido principal
-    st.title("Bienvenido al sistema de gestión del gimnasio")
-    st.write("Esta es una versión inicial para comprobar la conexión a Supabase y el sistema de login.")
-    
-    # Mostrar información de la conexión
-    st.subheader("Información de la conexión")
-    st.json({
-        "Usuario": f"{user['monitor_data']['nombre']} {user['monitor_data']['apellidos']}",
-        "Email": user['email'],
-        "NIP": user['monitor_data']['nip'],
-        "Es monitor": user['monitor_data']['es_monitor']
-    })
+    # Mostrar la página seleccionada
+    if selected_page == "Inicio":
+        st.title("Bienvenido al sistema de gestión del gimnasio")
+        st.write("Selecciona una opción del menú lateral para comenzar.")
+        
+        # Tarjetas informativas
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info("**Gestión de Agentes**: Registra y administra los agentes de la Policía Local.")
+        with col2:
+            st.info("**Gestión de Actividades**: Administra las actividades disponibles en el gimnasio.")
+        with col3:
+            st.info("**Reservas del Gimnasio**: Programa actividades en el calendario.")
+            
+        st.info("**Dashboard**: Visualiza estadísticas sobre la participación de los agentes en las actividades.")
+            
+    elif selected_page == "Gestión de Agentes":
+        agent_management.show_agent_management()
+        
+    elif selected_page == "Gestión de Actividades":
+        activity_management.show_activity_management()
+        
+    elif selected_page == "Reservas del Gimnasio":
+        reservation_management.show_reservation_management()
+        
+    elif selected_page == "Dashboard":
+        dashboard.show_dashboard()
 
 # Función principal
 def main():

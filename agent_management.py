@@ -24,6 +24,25 @@ def show_agent_management():
 def show_agent_registration():
     st.header("Registro de Nuevo Agente")
     
+    # Verificar si debemos limpiar el formulario (después de un registro exitoso)
+    if 'clear_form' in st.session_state and st.session_state.clear_form:
+        # Limpiar las variables del formulario antes de renderizar los widgets
+        if 'register_nombre' in st.session_state:
+            del st.session_state.register_nombre
+        if 'register_apellidos' in st.session_state:
+            del st.session_state.register_apellidos
+        if 'register_nip' in st.session_state:
+            del st.session_state.register_nip
+        if 'register_email' in st.session_state:
+            del st.session_state.register_email
+        if 'register_telefono' in st.session_state:
+            del st.session_state.register_telefono
+        if 'register_es_monitor' in st.session_state:
+            del st.session_state.register_es_monitor
+        
+        # Resetear el flag
+        st.session_state.clear_form = False
+    
     with st.form("register_agent_form"):
         col1, col2 = st.columns(2)
         
@@ -75,13 +94,9 @@ def show_agent_registration():
                     
                     if response.data:
                         st.success(f"Agente {nombre} {apellidos} registrado correctamente")
-                        # Limpiar el formulario - mejor experiencia de usuario
-                        st.session_state.register_nombre = ""
-                        st.session_state.register_apellidos = ""
-                        st.session_state.register_nip = ""
-                        st.session_state.register_email = ""
-                        st.session_state.register_telefono = ""
-                        st.session_state.register_es_monitor = False
+                        # En lugar de modificar directamente, establecemos un flag para limpiar en la próxima ejecución
+                        st.session_state.clear_form = True
+                        st.rerun()
                     else:
                         st.error("Error al registrar el agente")
 
@@ -214,4 +229,3 @@ def show_agent_edit():
                             st.error("Error al actualizar el agente")
         else:
             st.error(f"No se encontró ningún agente con el NIP {nip}")
-

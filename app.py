@@ -13,26 +13,13 @@ st.set_page_config(
 def show_login_page():
     st.title("Acceso Gimnasio Policía Local de Vigo")
     
+    # Colocar el campo de email fuera del formulario para usarlo con ambos botones
+    email = st.text_input("Email", key="login_email")
+    
+    # Formulario para el login
     with st.form("login_form"):
-        email = st.text_input("Email", key="login_email")
         password = st.text_input("Contraseña", type="password", key="login_password")
-        
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            submitted = st.form_submit_button("Iniciar Sesión")
-        
-        with col2:
-            st.write("")  # Espacio para alineación
-            if st.button("Recuperar Contraseña"):
-                if email:
-                    success, message = reset_password(email)
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-                else:
-                    st.error("Por favor, introduce tu email para recuperar la contraseña")
+        submitted = st.form_submit_button("Iniciar Sesión")
         
         if submitted:
             if not email or not password:
@@ -45,6 +32,17 @@ def show_login_page():
                     st.experimental_rerun()
                 else:
                     st.error(user_data.get("error", "Error de autenticación"))
+    
+    # Botón de recuperar contraseña fuera del formulario
+    if st.button("Recuperar Contraseña"):
+        if email:
+            success, message = reset_password(email)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+        else:
+            st.error("Por favor, introduce tu email para recuperar la contraseña")
 
 # Función para mostrar la página principal después del login
 def show_main_page():
@@ -85,4 +83,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

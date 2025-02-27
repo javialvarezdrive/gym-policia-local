@@ -15,3 +15,13 @@ def get_supabase_client():
     
     return create_client(supabase_url, supabase_key)
 
+
+-- Función para ejecutar consultas dinámicas (útil para reportes y dashboard)
+CREATE OR REPLACE FUNCTION ejecutar_consulta(query text)
+RETURNS SETOF json AS $$
+BEGIN
+  RETURN QUERY EXECUTE query;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+

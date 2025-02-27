@@ -35,8 +35,8 @@ def login(username, password):
                 'role': user['role']
             }
             
-            # Establecer cookie con el token
-            st.experimental_set_query_params(token=token)
+            # Establecer token en query params (versión actualizada)
+            st.query_params.update({"token": token})
             
             return True
     
@@ -67,8 +67,8 @@ def logout():
     if 'user' in st.session_state:
         del st.session_state.user
     
-    # Limpiar parámetros de consulta para eliminar el token
-    st.experimental_set_query_params()
+    # Limpiar parámetros de consulta para eliminar el token (versión actualizada)
+    st.query_params.clear()
     st.rerun()
 
 def get_current_user():
@@ -77,10 +77,10 @@ def get_current_user():
     if 'user' in st.session_state:
         return st.session_state.user
     
-    # Si no está en session_state, intentar desde los query params
-    query_params = st.experimental_get_query_params()
-    if 'token' in query_params:
-        token = query_params['token'][0]
+    # Si no está en session_state, intentar desde los query params (versión actualizada)
+    params = st.query_params
+    if "token" in params:
+        token = params["token"]
         try:
             # Verificar y decodificar el token
             payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
@@ -95,10 +95,10 @@ def get_current_user():
         except jwt.ExpiredSignatureError:
             # Token expirado
             st.warning("Tu sesión ha expirado. Por favor inicia sesión nuevamente.")
-            st.experimental_set_query_params()
+            st.query_params.clear()
         except jwt.InvalidTokenError:
             # Token inválido
-            st.experimental_set_query_params()
+            st.query_params.clear()
     
     return None
 

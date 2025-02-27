@@ -7,23 +7,24 @@ from db_utils import get_supabase_client
 SECRET_KEY = "tu_clave_secreta_aqui_cambiala_en_produccion"
 TOKEN_EXPIRY_DAYS = 7  # El token durará 7 días
 
-def login(username, password):
+def login(email, password):
     """Maneja el proceso de login y configura la sesión"""
     supabase = get_supabase_client()
     
-    # Buscar el usuario en la base de datos
-    response = supabase.table('usuarios').select('*').eq('username', username).execute()
+    # Buscar el usuario en la base de datos por email
+    response = supabase.table('usuarios').select('*').eq('email', email).execute()
     
     if response.data and len(response.data) > 0:
         user = response.data[0]
         
-        # Verificar contraseña (en una aplicación real deberías usar hash)
+        # Verificar contraseña
         if user['password'] == password:
             # Crear token JWT
             expiry = datetime.utcnow() + timedelta(days=TOKEN_EXPIRY_DAYS)
             token = jwt.encode({
                 'user_id': user['id'],
                 'username': user['username'],
+                'email': user['email'],
                 'role': user['role'],
                 'exp': expiry
             }, SECRET_KEY, algorithm="HS256")
@@ -32,29 +33,30 @@ def login(username, password):
             st.session_state.user = {
                 'id': user['id'],
                 'username': user['username'],
+                'email': user['email'],
                 'role': user['role']
             }
             
-            # Establecer token en query params (versión actualizada)
+            # Establecer token en query params
             st.query_params.update({"token": token})
             
-            return True
+            return True, st.session_state.user
     
-    return False
+    return False, None
 
-def reset_password(username, new_password):
+def reset_password(email, new_password):
     """Restablece la contraseña de un usuario"""
     supabase = get_supabase_client()
     
     # Verificar que el usuario existe
-    response = supabase.table('usuarios').select('*').eq('username', username).execute()
+    response = supabase.table('usuarios').select('*').eq('email', email).execute()
     
     if response.data and len(response.data) > 0:
         user = response.data[0]
         
         # Actualizar la contraseña
         update_response = supabase.table('usuarios').update(
-            {'password': new_password}
+            {'password': new_password, 'updated_at': datetime.now().isoformat()}
         ).eq('id', user['id']).execute()
         
         if update_response.data:
@@ -67,7 +69,7 @@ def logout():
     if 'user' in st.session_state:
         del st.session_state.user
     
-    # Limpiar parámetros de consulta para eliminar el token (versión actualizada)
+    # Limpiar parámetros de consulta para eliminar el token
     st.query_params.clear()
     st.rerun()
 
@@ -77,7 +79,7 @@ def get_current_user():
     if 'user' in st.session_state:
         return st.session_state.user
     
-    # Si no está en session_state, intentar desde los query params (versión actualizada)
+    # Si no está en session_state, intentar desde los query params
     params = st.query_params
     if "token" in params:
         token = params["token"]
@@ -89,6 +91,7 @@ def get_current_user():
             st.session_state.user = {
                 'id': payload['user_id'],
                 'username': payload['username'],
+                'email': payload.get('email'),  # Usar get para manejar tokens antiguos
                 'role': payload['role']
             }
             return st.session_state.user

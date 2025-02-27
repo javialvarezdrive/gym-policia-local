@@ -42,6 +42,26 @@ def login(username, password):
     
     return False
 
+def reset_password(username, new_password):
+    """Restablece la contraseña de un usuario"""
+    supabase = get_supabase_client()
+    
+    # Verificar que el usuario existe
+    response = supabase.table('usuarios').select('*').eq('username', username).execute()
+    
+    if response.data and len(response.data) > 0:
+        user = response.data[0]
+        
+        # Actualizar la contraseña
+        update_response = supabase.table('usuarios').update(
+            {'password': new_password}
+        ).eq('id', user['id']).execute()
+        
+        if update_response.data:
+            return True
+    
+    return False
+
 def logout():
     """Maneja el proceso de logout"""
     if 'user' in st.session_state:
@@ -82,9 +102,14 @@ def get_current_user():
     
     return None
 
-def is_logged_in():
+def is_authenticated():
     """Verifica si el usuario ha iniciado sesión"""
     return get_current_user() is not None
+
+def is_admin():
+    """Verifica si el usuario actual es administrador"""
+    user = get_current_user()
+    return user and user.get('role') == 'admin'
 
 def show_login_required():
     """Muestra un mensaje de inicio de sesión requerido"""

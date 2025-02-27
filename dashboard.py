@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, timedelta
 from db_utils import get_supabase_client
 
@@ -20,69 +19,51 @@ def show_dashboard():
         st.error("La fecha de inicio debe ser anterior a la fecha de fin")
         return
     
-    # Obtener datos para el dashboard
-    query = f'''
-    SELECT a.nombre, a.apellidos, a.nip, a.seccion, a.grupo, COUNT(p.id) as total_participaciones
-    FROM agentes a
-    LEFT JOIN participaciones p ON a.id = p.agente_id
-    LEFT JOIN reservas r ON p.reserva_id = r.id
-    WHERE r.fecha BETWEEN '{start_date}' AND '{end_date}' OR r.fecha IS NULL
-    GROUP BY a.id, a.nombre, a.apellidos, a.nip, a.seccion, a.grupo
-    ORDER BY total_participaciones DESC
-    '''
+    # Cargar datos sin usar la función RPC
     
-    response = supabase.rpc('ejecutar_consulta', {'query': query}).execute()
+    # 1. Obtener todos los agentes
+    agentes_response = supabase.table('agentes').select('*').execute()
+    agentes = agentes_response.data if agentes_response.data else []
     
-    # Si no hay función RPC, alternativa manual (menos eficiente)
-    if not response.data:
-        # Obtener todos los agentes
-        agentes_response = supabase.table('agentes').select('*').execute()
-        agentes = agentes_response.data if agentes_response.data else []
+    if not agentes:
+        st.info("No hay agentes registrados en el sistema")
+        return
+    
+    # 2. Para cada agente, contar participaciones
+    dashboard_data = []
+    
+    for agente in agentes:
+        # Obtener participaciones del agente
+        participaciones_response = supabase.table('participaciones').select('*').eq('agente_id', agente['id']).execute()
+        participaciones = participaciones_response.data if participaciones_response.data else []
         
-        # Para cada agente, contar participaciones
-        dashboard_data = []
-        for agente in agentes:
-            # Obtener participaciones del agente
-            participaciones_query = f'''
-            SELECT COUNT(p.id) as total
-            FROM participaciones p
-            JOIN reservas r ON p.reserva_id = r.id
-            WHERE p.agente_id = '{agente['id']}'
-            AND r.fecha BETWEEN '{start_date}' AND '{end_date}'
-            '''
-            
-            participaciones_response = supabase.rpc('ejecutar_consulta', {'query': participaciones_query}).execute()
-            
-            # Si no funciona el RPC, hacerlo manualmente
-            if not participaciones_response.data:
-                # Obtener todas las participaciones del agente
-                participaciones_response = supabase.table('participaciones').select('*').eq('agente_id', agente['id']).execute()
+        # Contar participaciones en el rango de fechas
+        total_participaciones = 0
+        for p in participaciones:
+            # Obtener la reserva correspondiente
+            reserva_response = supabase.table('reservas').select('*').eq('id', p['reserva_id']).execute()
+            if reserva_response.data:
+                # Convertir fecha a objeto date para comparar
+                reserva_fecha_str = reserva_response.data[0]['fecha'].split('T')[0] if 'T' in reserva_response.data[0]['fecha'] else reserva_response.data[0]['fecha']
+                reserva_fecha = datetime.strptime(reserva_fecha_str, "%Y-%m-%d").date()
                 
-                # Filtrar por fecha si hay participaciones
-                total_participaciones = 0
-                if participaciones_response.data:
-                    for p in participaciones_response.data:
-                        reserva_response = supabase.table('reservas').select('*').eq('id', p['reserva_id']).execute()
-                        if reserva_response.data:
-                            reserva_fecha = datetime.strptime(reserva_response.data[0]['fecha'].split('T')[0], '%Y-%m-%d').date()
-                            if start_date <= reserva_fecha <= end_date:
-                                total_participaciones += 1
-            else:
-                total_participaciones = participaciones_response.data[0]['total'] if participaciones_response.data else 0
-            
-            dashboard_data.append({
-                'nombre': agente['nombre'],
-                'apellidos': agente['apellidos'],
-                'nip': agente['nip'],
-                'seccion': agente['seccion'],
-                'grupo': agente['grupo'],
-                'total_participaciones': total_participaciones
-            })
+                # Verificar si está en el rango
+                if start_date <= reserva_fecha <= end_date:
+                    total_participaciones += 1
         
-        response.data = dashboard_data
+        # Añadir al conjunto de datos
+        dashboard_data.append({
+            'nombre': agente['nombre'],
+            'apellidos': agente['apellidos'],
+            'nip': agente['nip'],
+            'seccion': agente['seccion'],
+            'grupo': agente['grupo'],
+            'total_participaciones': total_participaciones
+        })
     
-    if response.data:
-        df = pd.DataFrame(response.data)
+    # Procesar y mostrar los datos
+    if dashboard_data:
+        df = pd.DataFrame(dashboard_data)
         
         # Visualización 1: Tabla de participaciones por agente
         st.subheader("Participaciones por Agente")
@@ -93,29 +74,17 @@ def show_dashboard():
         
         st.dataframe(df_display.sort_values('Total Participaciones', ascending=False), use_container_width=True)
         
-        # Visualización 2: Gráfico de participaciones por sección
+        # Visualización 2: Estadísticas por sección
         st.subheader("Participaciones por Sección")
         seccion_df = df.groupby('seccion')['total_participaciones'].sum().reset_index()
-        fig_seccion = px.bar(
-            seccion_df, 
-            x='seccion', 
-            y='total_participaciones',
-            labels={'seccion': 'Sección', 'total_participaciones': 'Total Participaciones'},
-            color='seccion',
-            title="Participaciones por Sección"
-        )
-        st.plotly_chart(fig_seccion, use_container_width=True)
+        seccion_df.columns = ['Sección', 'Total Participaciones']
+        st.dataframe(seccion_df, use_container_width=True)
         
-        # Visualización 3: Gráfico de participaciones por grupo
+        # Visualización 3: Estadísticas por grupo
         st.subheader("Participaciones por Grupo")
         grupo_df = df.groupby('grupo')['total_participaciones'].sum().reset_index()
-        fig_grupo = px.pie(
-            grupo_df, 
-            names='grupo', 
-            values='total_participaciones',
-            title="Participaciones por Grupo"
-        )
-        st.plotly_chart(fig_grupo, use_container_width=True)
+        grupo_df.columns = ['Grupo', 'Total Participaciones']
+        st.dataframe(grupo_df, use_container_width=True)
         
         # Visualización 4: Agentes con menor participación
         st.subheader("Agentes con Menor Participación")

@@ -29,7 +29,7 @@ def show_login_page():
                 
                 if success:
                     st.session_state.user = user_data
-                    st.experimental_rerun()
+                    st.rerun()  # Cambiado de experimental_rerun a rerun
                 else:
                     st.error(user_data.get("error", "Error de autenticación"))
     
@@ -59,7 +59,7 @@ def show_main_page():
         # Botón de logout
         if st.button("Cerrar Sesión"):
             logout()
-            st.experimental_rerun()
+            st.rerun()  # Cambiado de experimental_rerun a rerun
     
     # Contenido principal
     st.title("Bienvenido al sistema de gestión del gimnasio")

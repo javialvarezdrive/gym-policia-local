@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import uuid
 from db_utils import get_supabase_client
 from auth_utils import get_current_user
 
@@ -9,7 +8,7 @@ def show_reservation_management():
     st.title("Reservas del Gimnasio")
     
     # Tabs para organizar la interfaz
-    tabs = st.tabs(["Calendario de Reservas", "Nueva Reserva", "Gestionar Participantes"])
+    tabs = st.tabs(["Calendario de Reservas", "Nueva Reserva", "Gestionar Reservas"])
     
     # Tab de Calendario de Reservas
     with tabs[0]:
@@ -19,14 +18,16 @@ def show_reservation_management():
     with tabs[1]:
         show_new_reservation()
     
-    # Tab de Gestionar Participantes
+    # Tab de Gestión de Reservas
     with tabs[2]:
-        show_manage_participants()
+        show_reservation_management_tab()
 
 def show_reservation_calendar():
     st.header("Calendario de Reservas")
     
-    # Filtros de fecha
+    supabase = get_supabase_client()
+    
+    # Filtros de fecha para el calendario
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("Fecha Inicio", value=datetime.now().date())
@@ -37,130 +38,125 @@ def show_reservation_calendar():
         st.error("La fecha de inicio debe ser anterior a la fecha de fin")
         return
     
-    # Obtener reservas en el rango de fechas
-    supabase = get_supabase_client()
+    # Obtener las reservas directamente, sin usar RPC
+    reservas = []
     
-    # Consulta de reservas con join a turnos, actividades y monitores
-    reservas_query = f'''
-    SELECT r.id, r.fecha, t.nombre as turno, a.nombre as actividad, 
-           ag.nombre as monitor_nombre, ag.apellidos as monitor_apellidos,
-           (SELECT COUNT(*) FROM participaciones p WHERE p.reserva_id = r.id) as num_participantes
-    FROM reservas r
-    JOIN turnos t ON r.turno_id = t.id
-    JOIN actividades a ON r.actividad_id = a.id
-    JOIN agentes ag ON r.monitor_id = ag.id
-    WHERE r.fecha BETWEEN '{start_date}' AND '{end_date}'
-    ORDER BY r.fecha, t.nombre
-    '''
-    
-    reservas_response = supabase.rpc('ejecutar_consulta', {'query': reservas_query}).execute()
-    
-    # Si no hay función RPC configurada, puedes usar esta alternativa (menos eficiente)
-    if not reservas_response.data:
-        # Obtener reservas
-        reservas_response = supabase.table('reservas').select('*').gte('fecha', str(start_date)).lte('fecha', str(end_date)).execute()
-        
-        if reservas_response.data:
-            # Obtener datos adicionales de forma manual
-            reservas_data = []
-            for reserva in reservas_response.data:
-                # Obtener turno
-                turno_response = supabase.table('turnos').select('*').eq('id', reserva['turno_id']).execute()
-                turno = turno_response.data[0] if turno_response.data else {'nombre': 'Desconocido'}
-                
-                # Obtener actividad
-                actividad_response = supabase.table('actividades').select('*').eq('id', reserva['actividad_id']).execute()
-                actividad = actividad_response.data[0] if actividad_response.data else {'nombre': 'Desconocida'}
-                
-                # Obtener monitor
-                monitor_response = supabase.table('agentes').select('*').eq('id', reserva['monitor_id']).execute()
-                monitor = monitor_response.data[0] if monitor_response.data else {'nombre': 'Desconocido', 'apellidos': ''}
-                
-                # Contar participantes
-                participantes_response = supabase.table('participaciones').select('*').eq('reserva_id', reserva['id']).execute()
-                num_participantes = len(participantes_response.data) if participantes_response.data else 0
-                
-                reservas_data.append({
-                    'id': reserva['id'],
-                    'fecha': reserva['fecha'],
-                    'turno': turno['nombre'],
-                    'actividad': actividad['nombre'],
-                    'monitor_nombre': monitor['nombre'],
-                    'monitor_apellidos': monitor['apellidos'],
-                    'num_participantes': num_participantes
-                })
-            
-            reservas_response.data = reservas_data
+    # Consultar todas las reservas en el rango de fechas
+    reservas_response = supabase.table('reservas').select('*').gte('fecha', start_date.isoformat()).lte('fecha', end_date.isoformat()).execute()
     
     if reservas_response.data:
-        # Agrupar por fecha para visualización por día
-        df = pd.DataFrame(reservas_response.data)
-        
-        # Formatear fecha para agrupar por día
-        if 'fecha' in df.columns:
-            df['fecha'] = pd.to_datetime(df['fecha']).dt.date
-        
-        # Mostrar reservas agrupadas por fecha
-        for fecha, grupo in df.groupby('fecha'):
-            st.subheader(f"📅 {fecha.strftime('%d/%m/%Y')}")
+        # Para cada reserva, obtener información adicional
+        for reserva in reservas_response.data:
+            # Obtener datos del turno
+            turno_response = supabase.table('turnos').select('*').eq('id', reserva['turno_id']).execute()
+            turno = turno_response.data[0] if turno_response.data else None
             
-            # Preparar datos para mostrar
-            tabla_dia = grupo[['turno', 'actividad', 'monitor_nombre', 'monitor_apellidos', 'num_participantes']].copy()
-            tabla_dia.columns = ['Turno', 'Actividad', 'Nombre Monitor', 'Apellidos Monitor', 'Participantes']
-            tabla_dia['Monitor'] = tabla_dia['Nombre Monitor'] + ' ' + tabla_dia['Apellidos Monitor']
-            tabla_dia = tabla_dia[['Turno', 'Actividad', 'Monitor', 'Participantes']]
+            # Obtener datos de la actividad
+            actividad_response = supabase.table('actividades').select('*').eq('id', reserva['actividad_id']).execute()
+            actividad = actividad_response.data[0] if actividad_response.data else None
             
-            st.dataframe(tabla_dia, use_container_width=True)
-            st.divider()
-    else:
-        st.info("No hay reservas en el rango de fechas seleccionado")
+            # Obtener datos del monitor
+            monitor_response = supabase.table('agentes').select('*').eq('id', reserva['monitor_id']).execute()
+            monitor = monitor_response.data[0] if monitor_response.data else None
+            
+            # Obtener participantes
+            participantes_response = supabase.table('participaciones').select('*').eq('reserva_id', reserva['id']).execute()
+            num_participantes = len(participantes_response.data) if participantes_response.data else 0
+            
+            # Añadir información completa a la lista de reservas
+            reservas.append({
+                'id': reserva['id'],
+                'fecha': reserva['fecha'],
+                'turno': turno['nombre'] if turno else 'Desconocido',
+                'hora_inicio': turno['hora_inicio'] if turno else 'Desconocido',
+                'hora_fin': turno['hora_fin'] if turno else 'Desconocido',
+                'actividad': actividad['nombre'] if actividad else 'Desconocida',
+                'monitor': f"{monitor['nombre']} {monitor['apellidos']}" if monitor else 'Desconocido',
+                'num_participantes': num_participantes
+            })
+    
+    if not reservas:
+        st.info(f"No hay reservas programadas entre {start_date} y {end_date}")
+        return
+    
+    # Crear DataFrame para mostrar las reservas
+    df = pd.DataFrame(reservas)
+    
+    # Convertir fecha para mejor visualización
+    df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%d/%m/%Y')
+    
+    # Organizar las columnas para mejor visualización
+    df_display = df[['fecha', 'turno', 'hora_inicio', 'hora_fin', 'actividad', 'monitor', 'num_participantes']]
+    df_display.columns = ['Fecha', 'Turno', 'Hora Inicio', 'Hora Fin', 'Actividad', 'Monitor', 'Participantes']
+    
+    # Mostrar la tabla de reservas
+    st.dataframe(df_display, use_container_width=True)
 
 def show_new_reservation():
-    st.header("Nueva Reserva del Gimnasio")
+    st.header("Nueva Reserva")
     
     supabase = get_supabase_client()
-    user = get_current_user()
+    current_user = get_current_user()
     
+    if not current_user:
+        st.error("Debes iniciar sesión para crear reservas")
+        return
+    
+    # Obtener datos necesarios para el formulario
+    # Actividades
+    actividades_response = supabase.table('actividades').select('*').execute()
+    actividades = actividades_response.data if actividades_response.data else []
+    
+    if not actividades:
+        st.error("No hay actividades registradas en el sistema")
+        return
+    
+    # Turnos
+    turnos_response = supabase.table('turnos').select('*').execute()
+    turnos = turnos_response.data if turnos_response.data else []
+    
+    if not turnos:
+        st.error("No hay turnos registrados en el sistema")
+        return
+    
+    # Monitores (agentes que son monitores)
+    monitores_response = supabase.table('agentes').select('*').eq('es_monitor', True).execute()
+    monitores = monitores_response.data if monitores_response.data else []
+    
+    if not monitores:
+        st.error("No hay monitores registrados en el sistema")
+        return
+    
+    # Crear el formulario
     with st.form("new_reservation_form"):
-        col1, col2 = st.columns(2)
+        # Fecha
+        fecha = st.date_input("Fecha", min_value=datetime.now().date())
         
-        with col1:
-            fecha = st.date_input("Fecha", value=datetime.now().date())
-            
-            # Obtener turnos
-            turnos_response = supabase.table('turnos').select('*').execute()
-            turnos = turnos_response.data if turnos_response.data else []
-            turnos_opciones = {t['id']: t['nombre'] for t in turnos}
-            turno_id = st.selectbox("Turno", options=list(turnos_opciones.keys()), format_func=lambda x: turnos_opciones[x])
+        # Turno
+        turno_options = {turno['id']: f"{turno['nombre']} ({turno['hora_inicio']} - {turno['hora_fin']})" for turno in turnos}
+        turno_id = st.selectbox("Turno", options=list(turno_options.keys()), format_func=lambda x: turno_options[x])
         
-        with col2:
-            # Obtener actividades
-            actividades_response = supabase.table('actividades').select('*').execute()
-            actividades = actividades_response.data if actividades_response.data else []
-            actividades_opciones = {a['id']: a['nombre'] for a in actividades}
-            actividad_id = st.selectbox("Actividad", options=list(actividades_opciones.keys()), format_func=lambda x: actividades_opciones[x])
-            
-            # Obtener monitores (todos los agentes que son monitores)
-            monitores_response = supabase.table('agentes').select('*').eq('es_monitor', True).execute()
-            monitores = monitores_response.data if monitores_response.data else []
-            monitores_opciones = {m['id']: f"{m['nombre']} {m['apellidos']}" for m in monitores}
-            
-            # Por defecto, seleccionar al monitor actual
-            monitor_id_default = next((m['id'] for m in monitores if m['email'] == user['email']), None)
-            monitor_id = st.selectbox("Monitor", options=list(monitores_opciones.keys()), format_func=lambda x: monitores_opciones[x], index=list(monitores_opciones.keys()).index(monitor_id_default) if monitor_id_default in list(monitores_opciones.keys()) else 0)
+        # Actividad
+        actividad_options = {actividad['id']: actividad['nombre'] for actividad in actividades}
+        actividad_id = st.selectbox("Actividad", options=list(actividad_options.keys()), format_func=lambda x: actividad_options[x])
         
-        submit = st.form_submit_button("Realizar Reserva")
+        # Monitor
+        monitor_options = {monitor['id']: f"{monitor['nombre']} {monitor['apellidos']} ({monitor['nip']})" for monitor in monitores}
+        monitor_id = st.selectbox("Monitor", options=list(monitor_options.keys()), format_func=lambda x: monitor_options[x])
+        
+        # Botón para enviar el formulario
+        submit = st.form_submit_button("Crear Reserva")
         
         if submit:
-            # Comprobar disponibilidad
-            disponibilidad_response = supabase.table('reservas').select('*').eq('fecha', str(fecha)).eq('turno_id', turno_id).execute()
+            # Verificar si ya existe una reserva para esa fecha y turno
+            check_response = supabase.table('reservas').select('*').eq('fecha', fecha.isoformat()).eq('turno_id', turno_id).execute()
             
-            if disponibilidad_response.data and len(disponibilidad_response.data) > 0:
-                st.error(f"Ya existe una reserva para la fecha {fecha} en ese turno")
+            if check_response.data and len(check_response.data) > 0:
+                st.error(f"Ya existe una reserva para el {fecha} en ese turno")
             else:
-                # Registrar la reserva
+                # Crear la reserva
                 data = {
-                    'fecha': str(fecha),
+                    'fecha': fecha.isoformat(),
                     'turno_id': turno_id,
                     'actividad_id': actividad_id,
                     'monitor_id': monitor_id
@@ -169,83 +165,114 @@ def show_new_reservation():
                 response = supabase.table('reservas').insert(data).execute()
                 
                 if response.data:
-                    st.success(f"Reserva registrada correctamente para el {fecha}")
+                    st.success(f"Reserva creada correctamente para el {fecha}")
+                    # Mostrar botón para gestionar participantes
+                    reserva_id = response.data[0]['id']
+                    st.session_state.created_reservation_id = reserva_id
+                    st.info("Puedes añadir participantes en la pestaña 'Gestionar Reservas'")
                 else:
-                    st.error("Error al registrar la reserva")
+                    st.error("Error al crear la reserva")
 
-def show_manage_participants():
-    st.header("Gestionar Participantes")
+def show_reservation_management_tab():
+    st.header("Gestionar Reservas")
     
     supabase = get_supabase_client()
     
-    # Step 1: Select a reservation
-    # Obtener reservas futuras (desde hoy)
-    reservas_query = f'''
-    SELECT r.id, r.fecha, t.nombre as turno, a.nombre as actividad, 
-           ag.nombre as monitor_nombre, ag.apellidos as monitor_apellidos
-    FROM reservas r
-    JOIN turnos t ON r.turno_id = t.id
-    JOIN actividades a ON r.actividad_id = a.id
-    JOIN agentes ag ON r.monitor_id = ag.id
-    WHERE r.fecha >= '{datetime.now().date()}'
-    ORDER BY r.fecha, t.nombre
-    '''
+    # Permitir buscar una reserva existente
+    fecha_busqueda = st.date_input("Buscar reservas por fecha", value=datetime.now().date())
     
-    reservas_response = supabase.rpc('ejecutar_consulta', {'query': reservas_query}).execute()
+    # Obtener reservas para la fecha seleccionada
+    reservas_response = supabase.table('reservas').select('*').eq('fecha', fecha_busqueda.isoformat()).execute()
+    reservas = reservas_response.data if reservas_response.data else []
     
-    # Si no hay función RPC, alternativa manual
-    if not reservas_response.data:
-        reservas_response = supabase.table('reservas').select('*').gte('fecha', str(datetime.now().date())).execute()
-        
-        if reservas_response.data:
-            reservas_data = []
-            for reserva in reservas_response.data:
-                # Obtener turno
-                turno_response = supabase.table('turnos').select('*').eq('id', reserva['turno_id']).execute()
-                turno = turno_response.data[0] if turno_response.data else {'nombre': 'Desconocido'}
-                
-                # Obtener actividad
-                actividad_response = supabase.table('actividades').select('*').eq('id', reserva['actividad_id']).execute()
-                actividad = actividad_response.data[0] if actividad_response.data else {'nombre': 'Desconocida'}
-                
-                # Obtener monitor
-                monitor_response = supabase.table('agentes').select('*').eq('id', reserva['monitor_id']).execute()
-                monitor = monitor_response.data[0] if monitor_response.data else {'nombre': 'Desconocido', 'apellidos': ''}
-                
-                reservas_data.append({
-                    'id': reserva['id'],
-                    'fecha': reserva['fecha'],
-                    'turno': turno['nombre'],
-                    'actividad': actividad['nombre'],
-                    'monitor_nombre': monitor['nombre'],
-                    'monitor_apellidos': monitor['apellidos'],
-                })
-            
-            reservas_response.data = reservas_data
-    
-    if not reservas_response.data:
-        st.info("No hay reservas disponibles para gestionar participantes")
+    if not reservas:
+        st.info(f"No hay reservas para el {fecha_busqueda}")
         return
     
-    # Crear opciones para el selector de reservas
-    reservas_opciones = {r['id']: f"{r['fecha']} - {r['turno']} - {r['actividad']}" for r in reservas_response.data}
-    reserva_id = st.selectbox("Seleccionar Reserva", options=list(reservas_opciones.keys()), format_func=lambda x: reservas_opciones[x])
-    
-    # Step 2: Mostrar participantes actuales
-    st.subheader("Participantes Actuales")
-    
-    participantes_response = supabase.table('participaciones').select('*').eq('reserva_id', reserva_id).execute()
-    
-    if participantes_response.data:
-        participantes_ids = [p['agente_id'] for p in participantes_response.data]
-        participantes_data = []
+    # Preparar opciones para el selectbox
+    reservas_info = []
+    for reserva in reservas:
+        # Obtener datos del turno
+        turno_response = supabase.table('turnos').select('*').eq('id', reserva['turno_id']).execute()
+        turno = turno_response.data[0] if turno_response.data else None
         
-        for p_id in participantes_ids:
-            agente_response = supabase.table('agentes').select('*').eq('id', p_id).execute()
+        # Obtener datos de la actividad
+        actividad_response = supabase.table('actividades').select('*').eq('id', reserva['actividad_id']).execute()
+        actividad = actividad_response.data[0] if actividad_response.data else None
+        
+        # Crear información resumida
+        turno_info = f"{turno['nombre']} ({turno['hora_inicio']} - {turno['hora_fin']})" if turno else "Turno desconocido"
+        actividad_info = actividad['nombre'] if actividad else "Actividad desconocida"
+        
+        reservas_info.append({
+            'id': reserva['id'],
+            'info': f"{fecha_busqueda} - {turno_info} - {actividad_info}"
+        })
+    
+    # Permitir seleccionar una reserva
+    reserva_options = {r['id']: r['info'] for r in reservas_info}
+    selected_reserva_id = st.selectbox("Seleccionar reserva", options=list(reserva_options.keys()), format_func=lambda x: reserva_options[x])
+    
+    if selected_reserva_id:
+        manage_reservation_participants(selected_reserva_id)
+
+def manage_reservation_participants(reserva_id):
+    supabase = get_supabase_client()
+    
+    # Obtener información de la reserva
+    reserva_response = supabase.table('reservas').select('*').eq('id', reserva_id).execute()
+    
+    if not reserva_response.data:
+        st.error("No se pudo obtener la información de la reserva")
+        return
+    
+    reserva = reserva_response.data[0]
+    
+    # Obtener información adicional
+    # Turno
+    turno_response = supabase.table('turnos').select('*').eq('id', reserva['turno_id']).execute()
+    turno = turno_response.data[0] if turno_response.data else None
+    
+    # Actividad
+    actividad_response = supabase.table('actividades').select('*').eq('id', reserva['actividad_id']).execute()
+    actividad = actividad_response.data[0] if actividad_response.data else None
+    
+    # Monitor
+    monitor_response = supabase.table('agentes').select('*').eq('id', reserva['monitor_id']).execute()
+    monitor = monitor_response.data[0] if monitor_response.data else None
+    
+    # Mostrar información de la reserva
+    st.subheader("Detalles de la Reserva")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write(f"**Fecha:** {reserva['fecha']}")
+        st.write(f"**Turno:** {turno['nombre'] if turno else 'Desconocido'}")
+        st.write(f"**Horario:** {turno['hora_inicio'] if turno else '?'} - {turno['hora_fin'] if turno else '?'}")
+    
+    with col2:
+        st.write(f"**Actividad:** {actividad['nombre'] if actividad else 'Desconocida'}")
+        st.write(f"**Monitor:** {monitor['nombre']} {monitor['apellidos'] if monitor else 'Desconocido'}")
+    
+    # Gestión de participantes
+    st.subheader("Participantes")
+    
+    # Obtener participantes actuales
+    participaciones_response = supabase.table('participaciones').select('*').eq('reserva_id', reserva_id).execute()
+    participaciones = participaciones_response.data if participaciones_response.data else []
+    
+    # Mostrar lista de participantes actuales
+    if participaciones:
+        participantes_info = []
+        
+        for p in participaciones:
+            # Obtener información del agente
+            agente_response = supabase.table('agentes').select('*').eq('id', p['agente_id']).execute()
             if agente_response.data:
                 agente = agente_response.data[0]
-                participantes_data.append({
-                    'id': p_id,
+                participantes_info.append({
+                    'id': p['id'],
+                    'agente_id': agente['id'],
                     'nombre': agente['nombre'],
                     'apellidos': agente['apellidos'],
                     'nip': agente['nip'],
@@ -253,97 +280,105 @@ def show_manage_participants():
                     'grupo': agente['grupo']
                 })
         
-        if participantes_data:
-            df_participantes = pd.DataFrame(participantes_data)
-            df_participantes = df_participantes[['nombre', 'apellidos', 'nip', 'seccion', 'grupo']]
-            df_participantes.columns = ['Nombre', 'Apellidos', 'NIP', 'Sección', 'Grupo']
+        if participantes_info:
+            df = pd.DataFrame(participantes_info)
+            df['Nombre Completo'] = df['nombre'] + ' ' + df['apellidos']
+            df_display = df[['Nombre Completo', 'nip', 'seccion', 'grupo']]
+            df_display.columns = ['Nombre', 'NIP', 'Sección', 'Grupo']
             
-            st.dataframe(df_participantes, use_container_width=True)
+            st.write(f"Total de participantes: {len(df_display)}")
+            st.dataframe(df_display, use_container_width=True)
             
-            # Botón para eliminar participantes
-            if st.button("Eliminar todos los participantes"):
-                response = supabase.table('participaciones').delete().eq('reserva_id', reserva_id).execute()
-                if response.data:
-                    st.success("Todos los participantes han sido eliminados")
-                    st.rerun()
-                else:
-                    st.error("Error al eliminar participantes")
-        else:
-            st.info("No hay participantes en esta reserva")
+            # Opción para eliminar participantes
+            with st.expander("Eliminar participantes"):
+                agente_options = {row['agente_id']: f"{row['nombre']} {row['apellidos']} ({row['nip']})" for _, row in df.iterrows()}
+                agente_to_remove = st.selectbox("Seleccionar agente a eliminar", options=list(agente_options.keys()), format_func=lambda x: agente_options[x])
+                
+                if st.button("Eliminar Participante"):
+                    # Buscar la participación correspondiente
+                    participacion_to_remove = next((p for p in participaciones if p['agente_id'] == agente_to_remove), None)
+                    
+                    if participacion_to_remove:
+                        delete_response = supabase.table('participaciones').delete().eq('id', participacion_to_remove['id']).execute()
+                        
+                        if delete_response:
+                            st.success("Participante eliminado correctamente")
+                            st.rerun()
+                        else:
+                            st.error("Error al eliminar el participante")
     else:
-        st.info("No hay participantes en esta reserva")
+        st.info("No hay participantes registrados en esta reserva")
     
-    # Step 3: Agregar nuevos participantes
+    # Formulario para añadir participantes
     st.subheader("Añadir Participantes")
     
-    # Obtener agentes que no son participantes
+    # Obtener todos los agentes que no son participantes actuales
+    agentes_participantes_ids = [p['agente_id'] for p in participaciones]
+    
+    # Consultar todos los agentes
     agentes_response = supabase.table('agentes').select('*').execute()
     agentes = agentes_response.data if agentes_response.data else []
     
-    # Filtrar agentes que ya son participantes
-    participantes_ids_set = set(participantes_ids) if 'participantes_ids' in locals() else set()
-    agentes_disponibles = [a for a in agentes if a['id'] not in participantes_ids_set]
+    # Filtrar agentes que no son participantes actuales
+    agentes_disponibles = [a for a in agentes if a['id'] not in agentes_participantes_ids]
     
     if not agentes_disponibles:
-        st.info("No hay agentes disponibles para añadir")
-        return
-    
-    # Crear filtros para encontrar agentes
-    st.write("Filtrar agentes:")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        filter_seccion = st.multiselect(
-            "Sección",
-            options=list(set(a['seccion'] for a in agentes_disponibles)),
-            default=[]
-        )
-    
-    with col2:
-        filter_grupo = st.multiselect(
-            "Grupo",
-            options=list(set(a['grupo'] for a in agentes_disponibles)),
-            default=[]
-        )
-    
-    # Aplicar filtros
-    agentes_filtrados = agentes_disponibles
-    if filter_seccion:
-        agentes_filtrados = [a for a in agentes_filtrados if a['seccion'] in filter_seccion]
-    if filter_grupo:
-        agentes_filtrados = [a for a in agentes_filtrados if a['grupo'] in filter_grupo]
-    
-    # Mostrar agentes filtrados
-    if agentes_filtrados:
-        df_agentes = pd.DataFrame(agentes_filtrados)
-        df_agentes = df_agentes[['id', 'nombre', 'apellidos', 'nip', 'seccion', 'grupo']]
-        df_agentes.columns = ['ID', 'Nombre', 'Apellidos', 'NIP', 'Sección', 'Grupo']
-        
-        # Permitir selección múltiple
-        selected_indices = st.multiselect(
-            "Seleccionar Agentes a Añadir",
-            options=list(range(len(df_agentes))),
-            format_func=lambda i: f"{df_agentes.iloc[i]['Nombre']} {df_agentes.iloc[i]['Apellidos']} ({df_agentes.iloc[i]['NIP']})"
-        )
-        
-        if st.button("Añadir Participantes Seleccionados"):
-            if not selected_indices:
-                st.warning("No has seleccionado ningún agente")
-            else:
-                # Insertar participaciones
-                participaciones_data = []
-                for i in selected_indices:
-                    participaciones_data.append({
-                        'reserva_id': reserva_id,
-                        'agente_id': df_agentes.iloc[i]['ID']
-                    })
-                
-                if participaciones_data:
-                    response = supabase.table('participaciones').insert(participaciones_data).execute()
-                    if response.data:
-                        st.success(f"Se han añadido {len(participaciones_data)} participantes")
-                        st.rerun()
-                    else:
-                        st.error("Error al añadir participantes")
+        st.info("No hay más agentes disponibles para añadir")
     else:
-        st.info("No hay agentes disponibles con los filtros seleccionados")
+        # Opciones de filtrado
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            filter_seccion = st.multiselect(
+                "Filtrar por Sección",
+                options=list(set(a['seccion'] for a in agentes_disponibles)),
+                default=[]
+            )
+        
+        with col2:
+            filter_grupo = st.multiselect(
+                "Filtrar por Grupo",
+                options=list(set(a['grupo'] for a in agentes_disponibles)),
+                default=[]
+            )
+        
+        # Aplicar filtros
+        if filter_seccion:
+            agentes_disponibles = [a for a in agentes_disponibles if a['seccion'] in filter_seccion]
+        
+        if filter_grupo:
+            agentes_disponibles = [a for a in agentes_disponibles if a['grupo'] in filter_grupo]
+        
+        # Buscar por NIP o nombre
+        search_query = st.text_input("Buscar por NIP o Nombre")
+        
+        if search_query:
+            search_query = search_query.lower()
+            agentes_disponibles = [
+                a for a in agentes_disponibles 
+                if search_query in a['nip'].lower() or 
+                   search_query in a['nombre'].lower() or 
+                   search_query in a['apellidos'].lower()
+            ]
+        
+        # Seleccionar agente a añadir
+        if agentes_disponibles:
+            agente_options = {a['id']: f"{a['nombre']} {a['apellidos']} ({a['nip']}) - {a['seccion']} - {a['grupo']}" for a in agentes_disponibles}
+            selected_agente_id = st.selectbox("Seleccionar agente", options=list(agente_options.keys()), format_func=lambda x: agente_options[x])
+            
+            if st.button("Añadir Participante"):
+                # Crear nueva participación
+                data = {
+                    'reserva_id': reserva_id,
+                    'agente_id': selected_agente_id
+                }
+                
+                insert_response = supabase.table('participaciones').insert(data).execute()
+                
+                if insert_response.data:
+                    st.success("Participante añadido correctamente")
+                    st.rerun()
+                else:
+                    st.error("Error al añadir el participante")
+        else:
+            st.info("No hay agentes disponibles con los filtros seleccionados")
